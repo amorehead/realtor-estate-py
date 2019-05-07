@@ -5,17 +5,23 @@
 
 
 from tkinter import *
+import mechanize
+import http.cookiejar as cookielib
 
 # endregion Imports
 
 # region Variables
 
-case_page = "http://recorder.claycogov.com/irecordclient/login.aspx"
-username = ""
+login_url = "http://recorder.claycogov.com/irecordclient/login.aspx"
+request_url = "http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx"
+
+username = "GUEST"
 password = ""
+
 username_requested = False
 password_requested = False
 credentials_obtained = False
+authenticated = False
 is_quit = False
 
 # endregion Variables
@@ -60,12 +66,43 @@ def update_activity_display(message, display):
 
 
 def issue_request():
-    payload = {
-        "username": "<USER NAME>",
-        "password": "<PASSWORD>",
-        "csrfmiddlewaretoken": "<CSRF_TOKEN>"
-    }
-    return payload
+    global authenticated
+
+    # Browser Instantiation
+    br = mechanize.Browser()
+
+    # Cookie Jar
+    cj = cookielib.LWPCookieJar()
+    br.set_cookiejar(cj)
+
+    # Browser Options
+    br.set_handle_equiv(True)
+    br.set_handle_gzip(True)
+    br.set_handle_redirect(True)
+    br.set_handle_referer(True)
+    br.set_handle_robots(False)
+    br.set_handle_refresh(mechanize._http.HTTPRefreshProcessor(), max_time=1)
+
+    # The site to which we will navigate while also handling its session.
+    br.open("http://recorder.claycogov.com/irecordclient/login.aspx")
+
+    # Selects the first (index zero) form, the login form.
+    br.form = list(br.forms())[0]
+
+    # User Credentials
+    br.form["USERID"] = username
+    br.form["PASSWORD"] = password
+
+    # Login
+    br.submit()
+
+    # Proceed to the Search Page
+    response = br.open("http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx")
+    authenticated = True if "invalid" not in str(response.read()) else False
+    if authenticated:
+        for form in br.forms():
+            update_activity_display('\n' + str(form), activity_display)
+    return response
 
 
 def process_command(command):
@@ -121,17 +158,25 @@ def process_command(command):
             command_entry.config(state=DISABLED)
             command_entry.insert(0, "")
             return_pressed_command(activity_display, command_entry)
-            return "\n" \
-                   "Data successfully retrieved!"
+            if authenticated:
+                return "\n" \
+                       "Data successfully retrieved!"
+            else:
+                return "\n" \
+                       "Data was not successfully retrieved. Please try again with valid login credentials."
 
             # endregion Request Result
 
         # region Data Retrieval
 
         elif credentials_obtained:
-            if issue_request():  # Makes an HTTP post for authentication.
+            response = issue_request()
+            if response.code == 200:  # Makes an HTTP post for authentication.
                 return "\n" \
-                       "Request finished!"
+                       "Request successfully completed!"
+            else:
+                return "\n" \
+                       "Request was not completed. Please try again with a stable internet connection."
 
         # endregion Data Retrieval
 
@@ -154,10 +199,33 @@ def process_command(command):
     # region Password Empty
 
     elif password_requested:
-        return "\n" \
-               "Password cannot be empty. Please enter a valid password:"
+        password = ""
+        password_requested = False
+        credentials_obtained = True
+        command_entry.config(state=DISABLED)
+        command_entry.insert(0, "")
+        return_pressed_command(activity_display, command_entry)
+        if authenticated:
+            return "\n" \
+                   "Data successfully retrieved!"
+        else:
+            return "\n" \
+                   "Data was not successfully retrieved. Please try again with valid login credentials."
 
     # endregion Password Empty
+
+    # region Data Retrieval
+
+    elif credentials_obtained:
+        response = issue_request()
+        if response.code == 200:  # Makes an HTTP post for authentication.
+            return "\n" \
+                   "Request successfully completed!"
+        else:
+            return "\n" \
+                   "Request was invalid. Please try again with valid login credentials."
+
+    # endregion Data Retrieval
 
     # region Command Empty
     else:
