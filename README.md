@@ -1,2 +1,2 @@
 # realtor-estate
-A Python web scraper written to help collect report data on a regular basis.
+A Python web scraper written to help collect probate real estate data in an automated manner.
