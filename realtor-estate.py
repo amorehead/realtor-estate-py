@@ -3,24 +3,34 @@
 
 # region Imports
 
-
+import time
+import requests
+from datetime import date, timedelta
 from tkinter import *
-import mechanize
-import http.cookiejar as cookielib
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
 
 # endregion Imports
 
 # region Variables
 
 login_url = "http://recorder.claycogov.com/irecordclient/login.aspx"
-request_url = "http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx"
+instrument_type_search_url = "http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx"
+address_search_url = "https://gisweb.claycountymo.gov/mobile/"
 
-username = "GUEST"
+username = "guest"
 password = ""
+first_day_of_previous_month = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
+start_date = first_day_of_previous_month.strftime("%m/%d/%Y")
+last_day_of_previous_month = date.today().replace(day=1) - timedelta(days=1)
+end_date = last_day_of_previous_month.strftime("%m/%d/%Y")
+instrument_type = "prbt"
 
 username_requested = False
 password_requested = False
 credentials_obtained = False
+instrument_type_requested = False
 authenticated = False
 is_quit = False
 
@@ -66,43 +76,76 @@ def update_activity_display(message, display):
 
 
 def issue_request():
+    global start_date
+    global end_date
+    global instrument_type
     global authenticated
 
     # Browser Instantiation
-    br = mechanize.Browser()
-
-    # Cookie Jar
-    cj = cookielib.LWPCookieJar()
-    br.set_cookiejar(cj)
-
-    # Browser Options
-    br.set_handle_equiv(True)
-    br.set_handle_gzip(True)
-    br.set_handle_redirect(True)
-    br.set_handle_referer(True)
-    br.set_handle_robots(False)
-    br.set_handle_refresh(mechanize._http.HTTPRefreshProcessor(), max_time=1)
+    options = Options()
+    options.headless = False
+    browser = webdriver.Chrome(options=options)
 
     # The site to which we will navigate while also handling its session.
-    br.open("http://recorder.claycogov.com/irecordclient/login.aspx")
+    browser.get(login_url)
 
-    # Selects the first (index zero) form, the login form.
-    br.form = list(br.forms())[0]
-
-    # User Credentials
-    br.form["USERID"] = username
-    br.form["PASSWORD"] = password
+    # Locates and populates the elements containing the username and password entry fields.
+    username_element = browser.find_element_by_id("USERID")
+    username_element.send_keys(username)
+    password_element = browser.find_element_by_id("PASSWORD")
+    password_element.send_keys(password)
 
     # Login
-    br.submit()
+    password_element.send_keys(Keys.RETURN)
 
-    # Proceed to the Search Page
-    response = br.open("http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx")
-    authenticated = True if "invalid" not in str(response.read()) else False
+    authenticated = True if "invalid" not in str(browser.page_source) else False
     if authenticated:
-        for form in br.forms():
-            update_activity_display('\n' + str(form), activity_display)
-    return response
+        # Navigation to and Selection of Advanced Search
+        browser.get(instrument_type_search_url)
+
+        # Ensure Page Elements Have Loaded
+        time.sleep(1)
+
+        # Reveal Additional Search Fields
+        search_type = browser.find_element_by_id("lbSearchType")
+        search_type.click()
+
+        # Ensure Page Elements Have Loaded
+        time.sleep(1)
+
+        # Issue an Advanced Search Query
+        start_date_field = browser.find_element_by_id("STARTDATE")
+        start_date_field.send_keys(start_date)
+        end_date_field = browser.find_element_by_id("ENDDATE")
+        end_date_field.send_keys(end_date)
+        instrument_type_field = browser.find_element_by_id("INSTRUMENT_TYPES")
+        instrument_type_field.send_keys(instrument_type)
+        search_button = browser.find_element_by_id("SearchButton")
+        search_button.click()
+
+        # Harvest the Query
+        update_activity_display('\n' + str(browser.page_source), activity_display)
+
+        # Navigation to Second Page
+        browser.get(address_search_url)
+
+        # Ensure Page Elements Have Loaded
+        time.sleep(3)
+
+        # Click Agree
+        agree_field = browser.find_element_by_id("dojox_mobile_Button_0")
+        agree_field.click()
+
+        # Search by Address
+        address_search_field = browser.find_element_by_id("searchButton")
+        address_search_field.click()
+        address_search_tab = browser.find_element_by_id("addressTab")
+        address_search_tab.click()
+
+        # Ensure Page Elements Have Loaded
+        time.sleep(1)
+
+    return requests.get(instrument_type_search_url).status_code
 
 
 def process_command(command):
@@ -111,6 +154,8 @@ def process_command(command):
     global username_requested
     global password_requested
     global credentials_obtained
+    global instrument_type_requested
+    global instrument_type
     global is_quit
 
     split_command = command.split()
@@ -150,10 +195,19 @@ def process_command(command):
 
         # endregion Password Entry
 
-        # region Request Result
+        # region Instrument Type Entry
         elif password_requested:
             password = split_command[0]
             password_requested = False
+            instrument_type_requested = True
+            return "Please enter an instrument type:"
+
+        # endregion Instrument Type Entry
+
+        # region Request Result
+        elif instrument_type_requested:
+            instrument_type = split_command[0]
+            instrument_type_requested = False
             credentials_obtained = True
             command_entry.config(state=DISABLED)
             command_entry.insert(0, "")
@@ -163,15 +217,16 @@ def process_command(command):
                        "Data successfully retrieved!"
             else:
                 return "\n" \
-                       "Data was not successfully retrieved. Please try again with valid login credentials."
+                       "Data was not successfully retrieved." \
+                       " Please try again with a valid instrument and/or login credentials."
 
             # endregion Request Result
 
         # region Data Retrieval
 
         elif credentials_obtained:
-            response = issue_request()
-            if response.code == 200:  # Makes an HTTP post for authentication.
+            response_status = issue_request()
+            if response_status == 200:  # Makes an HTTP post for authentication.
                 return "\n" \
                        "Request successfully completed!"
             else:
@@ -196,29 +251,20 @@ def process_command(command):
 
     # endregion Username Empty
 
-    # region Password Empty
-
+    # region Instrument Type Entry
     elif password_requested:
         password = ""
         password_requested = False
-        credentials_obtained = True
-        command_entry.config(state=DISABLED)
-        command_entry.insert(0, "")
-        return_pressed_command(activity_display, command_entry)
-        if authenticated:
-            return "\n" \
-                   "Data successfully retrieved!"
-        else:
-            return "\n" \
-                   "Data was not successfully retrieved. Please try again with valid login credentials."
+        instrument_type_requested = True
+        return "Please enter an instrument type:"
 
-    # endregion Password Empty
+    # endregion Instrument Type Entry
 
     # region Data Retrieval
 
     elif credentials_obtained:
-        response = issue_request()
-        if response.code == 200:  # Makes an HTTP post for authentication.
+        response_status = issue_request()
+        if response_status == 200:  # Makes an HTTP post for authentication.
             return "\n" \
                    "Request successfully completed!"
         else:
