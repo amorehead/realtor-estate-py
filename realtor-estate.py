@@ -5,6 +5,8 @@
 
 import time
 import requests
+import PyPDF2
+from urllib.request import urlretrieve
 from datetime import date, timedelta
 from tkinter import *
 from selenium import webdriver
@@ -16,6 +18,7 @@ from selenium.webdriver.chrome.options import Options
 # region Variables
 
 login_url = "http://recorder.claycogov.com/irecordclient/login.aspx"
+base_search_url = "http://recorder.claycogov.com/irecordclient/"
 instrument_type_search_url = "http://recorder.claycogov.com/irecordclient/REALSearchByName.aspx"
 address_search_url = "https://gisweb.claycountymo.gov/mobile/"
 
@@ -124,19 +127,39 @@ def issue_request():
         search_button.click()
 
         # Harvest the Query
-        update_activity_display('\n' + str(browser.page_source), activity_display)
+        document_links = [link.get_attribute("href") for link in browser.find_elements_by_xpath("//a[@href]")
+                          if "PK" in link.get_attribute("href")]
+        for document_link in document_links:
+            # Procedurally Extracting Residential Addresses
+            i = 1
+            browser.get(document_link)
+            view_document_button = browser.find_element_by_id("BTN_VIEW_DOCUMENT")
+            on_click = view_document_button.get_attribute("onclick")
+            pdf_download_link = base_search_url + str(on_click).split('\'')[1]
+            print(pdf_download_link)
+            pdf_name = "Resource Document #" + str(i) + ".pdf"
+            urlretrieve(pdf_download_link, pdf_name)
+            pdf_file_object = open(pdf_name, "rb")
+            try:
+                pdf_reader = PyPDF2.PdfFileReader(pdf_file_object)
+                print(pdf_reader.numPages)
+                pdf_object = pdf_reader.getPage(2)
+                print(pdf_object.extractText())
+            except EOFError:
+                print("Error: PDF was not parsable due to an EOF exception.")
+            i += 1
 
         # Navigation to Second Page
         browser.get(address_search_url)
 
         # Ensure Page Elements Have Loaded
-        time.sleep(3)
+        time.sleep(2)
 
         # Click Agree
         agree_field = browser.find_element_by_id("dojox_mobile_Button_0")
         agree_field.click()
 
-        # Search by Address
+        # Navigation to Address Search
         address_search_field = browser.find_element_by_id("searchButton")
         address_search_field.click()
         address_search_tab = browser.find_element_by_id("addressTab")
@@ -144,6 +167,9 @@ def issue_request():
 
         # Ensure Page Elements Have Loaded
         time.sleep(1)
+
+        # Search by Address
+        # Insert logic here...
 
     return requests.get(instrument_type_search_url).status_code
 
