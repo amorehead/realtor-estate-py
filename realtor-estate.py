@@ -5,11 +5,11 @@
 
 import time
 import requests
-import PyPDF2
-from urllib.request import urlretrieve
+import pytesseract
+import pdf2image
 from datetime import date, timedelta
 from tkinter import *
-from selenium import webdriver
+from seleniumrequests import Chrome
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 
@@ -84,10 +84,13 @@ def issue_request():
     global instrument_type
     global authenticated
 
+    property_addresses = []
+    contacts_and_addresses = {}
+
     # Browser Instantiation
     options = Options()
     options.headless = False
-    browser = webdriver.Chrome(options=options)
+    browser = Chrome(options=options)
 
     # The site to which we will navigate while also handling its session.
     browser.get(login_url)
@@ -131,29 +134,28 @@ def issue_request():
                           if "PK" in link.get_attribute("href")]
         for document_link in document_links:
             # Procedurally Extracting Residential Addresses
-            i = 1
             browser.get(document_link)
             view_document_button = browser.find_element_by_id("BTN_VIEW_DOCUMENT")
             on_click = view_document_button.get_attribute("onclick")
             pdf_download_link = base_search_url + str(on_click).split('\'')[1]
-            print(pdf_download_link)
-            pdf_name = "Resource Document #" + str(i) + ".pdf"
-            urlretrieve(pdf_download_link, pdf_name)
-            pdf_file_object = open(pdf_name, "rb")
-            try:
-                pdf_reader = PyPDF2.PdfFileReader(pdf_file_object)
-                print(pdf_reader.numPages)
-                pdf_object = pdf_reader.getPage(2)
-                print(pdf_object.extractText())
-            except EOFError:
-                print("Error: PDF was not parsable due to an EOF exception.")
-            i += 1
+            pdf = browser.request("GET", pdf_download_link).content
+            pdf_image = pdf2image.convert_from_bytes(pdf)
+            if "MARGIN ABOVE" in pytesseract.image_to_string(pdf_image[1]):
+                pdf_text = pytesseract.image_to_string(pdf_image[4])
+            else:
+                pdf_text = pytesseract.image_to_string(pdf_image[2])
+            for item in pdf_text.split("\n"):
+                if "Residence" in item or "Decedent resided at" in item:
+                    property_address = item.strip().split(" at ")[1]
+                    if "Missourt" in property_address:
+                        property_address = property_address[:-1] + 'i'
+                    property_addresses.append(property_address)
 
         # Navigation to Second Page
         browser.get(address_search_url)
 
         # Ensure Page Elements Have Loaded
-        time.sleep(2)
+        time.sleep(1)
 
         # Click Agree
         agree_field = browser.find_element_by_id("dojox_mobile_Button_0")
@@ -164,6 +166,11 @@ def issue_request():
         address_search_field.click()
         address_search_tab = browser.find_element_by_id("addressTab")
         address_search_tab.click()
+        search_input_field = browser.find_element_by_id("search_input")
+
+        for property_address in property_addresses:
+            search_input_field.send_keys(property_address)
+            search_input_field.click()
 
         # Ensure Page Elements Have Loaded
         time.sleep(1)
@@ -217,6 +224,7 @@ def process_command(command):
             username = split_command[0]
             username_requested = False
             password_requested = True
+            command_entry.config(show="*")
             return "Please enter your password:"
 
         # endregion Password Entry
@@ -225,6 +233,7 @@ def process_command(command):
         elif password_requested:
             password = split_command[0]
             password_requested = False
+            command_entry.config(show="")
             instrument_type_requested = True
             return "Please enter an instrument type:"
 
@@ -281,6 +290,7 @@ def process_command(command):
     elif password_requested:
         password = ""
         password_requested = False
+        command_entry.config(show="")
         instrument_type_requested = True
         return "Please enter an instrument type:"
 
