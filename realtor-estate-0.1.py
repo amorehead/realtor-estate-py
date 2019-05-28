@@ -159,7 +159,7 @@ def issue_request():
 
     # Browser Instantiation
     options = Options()
-    options.headless = True
+    options.headless = False
     browser = Chrome(options=options)
 
     # The site to which we will navigate while also handling its session.
@@ -215,11 +215,11 @@ def issue_request():
 
             document_links = document_links | current_page_document_links
 
-        for document_link in document_links:
+        for result_page_link in document_links:
             # Procedurally Extracting Instrument Types, Recording Dates,
             # Dated Dates, Grantors, Grantees, & Property Addresses
             malformed_property_address_counter = 0
-            browser.get(document_link)
+            browser.get(result_page_link)
             column_data = browser.find_elements_by_class_name("coldata")
 
             for column_datum in column_data:
@@ -253,7 +253,7 @@ def issue_request():
             property_address = pyap.parse(pdf_text, country="US")
             if len(property_address) > 0:
                 property_address = str(property_address[0])
-            result_page_links.append(document_link)
+            result_page_links.append(result_page_link)
             property_addresses.append(property_address)
 
         update_activity_display("\n\n* Found " + str(len(
@@ -273,7 +273,9 @@ def issue_request():
         malformed_property_address_counter = 1
         for result_page_link, property_address in zip(result_page_links, property_addresses):
             try:
-                if len(property_address) > 0:
+                if len(property_address) == 0:
+                    raise NoSuchElementException
+                elif len(property_address) > 0:
 
                     # Navigation to Second Page
                     browser.get(gis_url)
@@ -359,6 +361,9 @@ def issue_request():
                                         hyperlink.add(
                                             lambda: webbrowser.open(malformed_property_address_result_page_link)))
                 activity_display.config(state=DISABLED)
+
+                property_owner_names.append([])
+                property_owner_addresses.append([])
 
                 malformed_property_address_counter += 1
                 pass
