@@ -18,8 +18,8 @@ from datetime import date, datetime
 from tkinter import *
 from seleniumrequests import Chrome
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
 
 # endregion Imports
 
@@ -158,9 +158,7 @@ def issue_request():
     # endregion Variable Declarations
 
     # Browser Instantiation
-    options = Options()
-    options.headless = False
-    browser = Chrome(options=options)
+    browser = Chrome(ChromeDriverManager().install())
 
     # The site to which we will navigate while also handling its session.
     browser.get(login_url)
