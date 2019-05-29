@@ -1,5 +1,8 @@
-# Realtor Estate 1.0
+# Realtor Estate 0.1 (tk)
 # A web scraper for gathering data relevant to real estate professionals.
+
+# Little note on the imports here... You may need to install tkinter for your OS.
+# On Ubuntu you can run apt to install the package python3-tk and you're all set.
 
 # region Imports
 
@@ -8,9 +11,11 @@ import requests
 import pytesseract
 import pdf2image
 import pyap
+import webbrowser
 import pandas as pd
 from dateutil.relativedelta import relativedelta
-from datetime import date
+from datetime import date, datetime
+from tkinter import *
 from seleniumrequests import Chrome
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import NoSuchElementException
@@ -55,7 +60,84 @@ is_quit = False
 
 # endregion Variables
 
+# region Classes
+
+class HyperlinkManager:
+
+    def __init__(self, text):
+
+        self.text = text
+
+        self.text.tag_config("hyper", foreground="blue", underline=1)
+
+        self.text.tag_bind("hyper", "<Enter>", self._enter)
+        self.text.tag_bind("hyper", "<Leave>", self._leave)
+        self.text.tag_bind("hyper", "<Button-1>", self._click)
+
+        self.links = {}
+
+    def add(self, action):
+        # add an action to the manager.  returns tags to use in
+        # associated text widget
+        tag = "hyper-%d" % len(self.links)
+        self.links[tag] = action
+        return "hyper", tag
+
+    def _enter(self, event):
+        self.text.config(cursor="hand2")
+
+    def _leave(self, event):
+        self.text.config(cursor="")
+
+    def _click(self, event):
+        for tag in self.text.tag_names(CURRENT):
+            if tag[:6] == "hyper-":
+                self.links[tag]()
+                return
+
+
+# endregion Classes
+
+# region Widgets
+
+# Root Tk window
+tk_root = Tk()
+
+# Sets the title of the application's window.
+tk_root.title("Realtor Estate 0.1")
+
+# Display for script activity
+activity_display = Text(tk_root, state=DISABLED)
+activity_display.pack(fill=BOTH, expand=YES)
+activity_display.insert(END, " ")
+
+hyperlink = HyperlinkManager(activity_display)
+
+# Entry box for commands
+command_entry = Entry(tk_root)
+command_entry.pack(fill=BOTH)
+
+
+# endregion Widgets
+
 # region Functions
+
+def update_activity_display(message, display):
+    """Adds and updates the message to the supplied display
+
+    :param message: Message to add to activity display
+    :param display: The activity display to add text to
+    :return: None
+    """
+    # Display is disabled by default. It must be enabled to add text.
+    display.config(state=NORMAL)
+    display.insert(END, message + "\n")
+
+    # Scrolls the display to the end, showing the last message.
+    display.see(END)
+
+    display.config(state=DISABLED)
+
 
 def issue_request():
     # region Variable Declarations
@@ -172,7 +254,7 @@ def issue_request():
             result_page_links.append(result_page_link)
             property_addresses.append(property_address)
 
-        print("\n\n* Found " + str(len(
+        update_activity_display("\n\n* Found " + str(len(
             property_addresses)) + " entries for \"" + instrument_type + "\" cases in the Clay"
                                                                          " County database. Compare"
                                                                          " this number to the"
@@ -182,7 +264,8 @@ def issue_request():
                                                                          " reconcile any"
                                                                          " discrepancies that may"
                                                                          " occur in the PDF"
-                                                                         " address-parsing process. *\n")
+                                                                         " address-parsing process. *\n",
+                                activity_display)
 
         valid_property_address_counter = 0
         malformed_property_address_counter = 1
@@ -264,13 +347,18 @@ def issue_request():
 
             except NoSuchElementException:
                 malformed_property_address_result_page_link = result_page_link
-                print(
+                update_activity_display(
                     "\nAn invalid address entered into the Clay County GIS address entry field was found.\n"
-                    + "It was located in the PDF found here:")
+                    + "It was located in the PDF found here:", activity_display)
 
-                print("Link to PDF #" + str(
-                    malformed_property_address_counter) + " for Manual Inspection:\n" +
-                      malformed_property_address_result_page_link)
+                activity_display.config(state=NORMAL)
+                activity_display.pack()
+                activity_display.insert(INSERT,
+                                        "Link to PDF #" + str(
+                                            malformed_property_address_counter) + " for Manual Inspection\n",
+                                        hyperlink.add(
+                                            lambda: webbrowser.open(malformed_property_address_result_page_link)))
+                activity_display.config(state=DISABLED)
 
                 property_owner_names.append([])
                 property_owner_addresses.append([])
@@ -296,9 +384,228 @@ def issue_request():
     return requests.get(instrument_type_search_url).status_code
 
 
+def process_command(command):
+    global username
+    global password
+    global username_requested
+    global password_requested
+    global date_range_type_requested
+    global date_difference
+    global start_date_requested
+    global start_date
+    global end_date_requested
+    global end_date
+    global credentials_obtained
+    global instrument_type_requested
+    global instrument_type
+    global is_quit
+
+    split_command = command.split()
+
+    if len(split_command) > 0:
+
+        # region Quit Command
+        if split_command[0] == "quit":
+            is_quit = True
+            return "Quitting..."
+
+        # endregion Quit Command
+
+        # region Username Entry
+        elif split_command[0] == "login":
+            username_requested = True
+            return "\n" \
+                   "Please enter your username:"
+
+        # endregion Username Command
+
+        # region Help Commands
+
+        elif split_command[0] == "help":
+            return "\nAll available commands:" \
+                   "\n" \
+                   "login: Initializes the user authentication procedure."
+
+        # endregion Help Commands
+
+        # region Password Entry
+        elif username_requested:
+            username = split_command[0]
+            username_requested = False
+            password_requested = True
+            command_entry.config(show="*")
+            return "\nPlease enter your password:"
+
+        # endregion Password Entry
+
+        # region Date Range Type Entry
+        elif password_requested:
+            password = split_command[0]
+            password_requested = False
+            command_entry.config(show="")
+            date_range_type_requested = True
+            return "\nPlease enter a date range. You may choose from any of the following characters:\n" \
+                   "(d: A Day Back | w: A Week Back | m: A Month Back\n" \
+                   " | h: Half a Year Back | y: A Full Year Back | c: A Custom Date Range)"
+
+        # endregion Date Range Type Entry
+
+        # region Instrument Type Entry
+        elif date_range_type_requested:
+            date_range_type = split_command[0].strip().lower()
+            date_range_type_requested = False
+
+            if date_range_type == 'd':
+                date_difference = one_day_back
+            elif date_range_type == 'w':
+                date_difference = one_week_back
+            elif date_range_type == 'm':
+                date_difference = one_month_back
+            elif date_range_type == 'h':
+                date_difference = half_a_year_back
+            elif date_range_type == 'y':
+                date_difference = one_year_back
+            elif date_range_type == 'c':
+                start_date_requested = True
+                return "\nPlease enter a start date (i.e. 01/01/2019):"
+            else:
+                return "\nAn invalid date range type was entered. Please restart and try again."
+
+            instrument_type_requested = True
+            start_date = date_difference.strftime("%m/%d/%Y")
+            end_date = date.today().strftime("%m/%d/%Y")
+            return "\nPlease enter an instrument type:"
+
+        # endregion Instrument Type Entry
+
+        # region Start Date Entry
+        elif start_date_requested:
+            start_date = datetime.strptime(split_command[0].strip(), "%m/%d/%Y").strftime("%m/%d/%Y")
+            start_date_requested = False
+            end_date_requested = True
+            return "\nPlease enter an end date (i.e. 12/31/2019):"
+
+        # endregion Start Date Entry
+
+        # region End Date Entry
+        elif end_date_requested:
+            end_date = datetime.strptime(split_command[0].strip(), "%m/%d/%Y").strftime("%m/%d/%Y")
+
+            if end_date < start_date:
+                return "A start date must be before an end date. Please restart and try again."
+
+            end_date_requested = False
+            instrument_type_requested = True
+            return "\nPlease enter an instrument type:"
+
+        # endregion End Date Entry
+
+        # region Request Result
+        elif instrument_type_requested:
+            instrument_type = split_command[0]
+            instrument_type_requested = False
+            credentials_obtained = True
+            command_entry.config(state=DISABLED)
+            command_entry.insert(0, "")
+            return_pressed_command(activity_display, command_entry)
+            command_entry.config(state=NORMAL)
+            if authenticated:
+                return "\n" \
+                       "Data successfully retrieved!"
+            else:
+                return "\n" \
+                       "Data was not successfully retrieved." \
+                       " Please try again with a valid instrument and/or login credentials."
+
+            # endregion Request Result
+
+        # region Data Retrieval
+
+        elif credentials_obtained:
+            response_status = issue_request()
+            if response_status == 200:  # Makes an HTTP post for authentication.
+                return "\n" \
+                       "\nRequest successfully completed!"
+            else:
+                return "\n" \
+                       "\nRequest was not completed. Please try again with a stable internet connection."
+
+        # endregion Data Retrieval
+
+        # region Command Not Recognized
+        else:
+            return "\n" \
+                   "Command not recognized." \
+                   "\n" \
+                   "Type \"help\" for list of commands."
+        # endregion Command Not Recognized
+
+    # region Username Empty
+
+    elif username_requested:
+        return "\n" \
+               "Username cannot be empty. Please enter a valid username:"
+
+    # endregion Username Empty
+
+    # region Date Range Entry
+    elif password_requested:
+        password = ""
+        password_requested = False
+        command_entry.config(show="")
+        date_range_type_requested = True
+        return "\nPlease enter a date range. You may choose from any of the following characters:\n" \
+               "(d: A Day Back | w: A Week Back | m: A Month Back\n" \
+               " | h: Half a Year Back | y: A Full Year Back | c: A Custom Date Range)"
+
+    # endregion Date Range Entry
+
+    # region Data Retrieval
+
+    elif credentials_obtained:
+        response_status = issue_request()
+        if response_status == 200:  # Makes an HTTP post for authentication.
+            return "\n" \
+                   "Request successfully completed!"
+        else:
+            return "\n" \
+                   "Request was invalid. Please try again with valid login credentials."
+
+    # endregion Data Retrieval
+
+    # region Command Empty
+    else:
+        return "Command not specified.\n" \
+               "Type \"help\" for list of commands."
+    # endregion Command Empty
+
+
+# region Commands
+
+
+def return_pressed_command(display, entry):
+    global is_quit
+    global tk_root
+
+    update_activity_display(process_command(entry.get()), display)
+
+    # Clear the entry after the command has been entered.
+    entry.delete(0, END)
+
+    # If we quit, stop the main GUI loop.
+    if is_quit:
+        tk_root.destroy()
+
+
 # endregion Commands
 
 # endregion Functions
+
+# region Command Bindings
+
+command_entry.bind("<Return>", lambda event: return_pressed_command(activity_display, command_entry))
+
+# endregion Command Bindings
 
 # region Main Entry Point
 
@@ -306,10 +613,13 @@ if __name__ == "__main__":
     # region Welcome Message
 
     # Presents the user with a welcome screen after the application has launched.
-    print("Welcome to Realtor Estate!"
-          "\n"
-          "You can type the command \"login\" below to begin.")
+    update_activity_display("Welcome to Realtor Estate!"
+                            "\n"
+                            "You can type the command \"login\" below to begin.",
+                            activity_display)
 
     # endregion Welcome Message
+
+    tk_root.mainloop()
 
 # endregion Main Entry Point
